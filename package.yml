@@ -1,0 +1,18 @@
+package: community.lazycat.app.stirlingpdf
+name: Stirling PDF
+version: 0.0.0
+description: "PDF toolbox in the browser: merge, split, convert, OCR and sign files locally."
+min_os_version: "1.5.0"
+homepage: https://www.stirlingpdf.com/
+author: Stirling PDF Inc.
+license: MIT
+permissions:
+  required:
+    - net.internet
+locales:
+  zh:
+    name: Stirling PDF
+    description: "浏览器里的 PDF 工具箱：合并、拆分、转换、OCR、加水印和签名，全在本地处理。"
+  en:
+    name: Stirling PDF
+    description: "PDF toolbox in the browser: merge, split, convert, OCR and sign files locally."

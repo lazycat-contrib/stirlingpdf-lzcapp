@@ -1,0 +1,54 @@
+application:
+  subdomain: stirlingpdf
+  multi_instance: false
+  upstreams:
+    - location: /package-licenses/
+      backend: file:///lzcapp/pkg/content/licenses/
+    - location: /
+      backend: http://stirlingpdf:8080/
+
+services:
+  stirlingpdf:
+    # upstream: stirlingtools/stirling-pdf:3.2.2
+    image: docker.1ms.run/stirlingtools/stirling-pdf:3.2.2
+    environment:
+      # Enable the built-in login and seed the first account from the deploy
+      # params; without enableLogin the UI is open to anyone who reaches it.
+      - SECURITY_ENABLELOGIN=true
+      - SECURITY_LOGINMETHOD=normal
+      - |-
+        SECURITY_INITIALLOGIN_USERNAME={{ .U.admin_username }}
+      - |-
+        SECURITY_INITIALLOGIN_PASSWORD={{ .U.admin_password }}
+      # Keeps generated PDFs and the settings file inside the mounted volume.
+      - DOCKER_ENABLE_SECURITY=true
+      - INSTALL_BOOK_AND_ADVANCED_HTML_OPS=false
+      - LANGS=zh_CN,en_GB
+      - TZ=Asia/Shanghai
+    binds:
+      - /lzcapp/var/config:/configs
+      - /lzcapp/var/data:/data
+
+usage: |
+  Stirling PDF 是浏览器里的 PDF 工具箱，几十种处理功能都在本地容器里完成。
+
+  使用方法：
+  1. 打开应用，用你安装时设置的用户名和密码登录。
+  2. 左侧是功能列表，常用的有：
+     - 合并 / 拆分 / 提取页面 / 旋转 / 调整顺序
+     - 图片与 PDF 互转、Word/Excel/PPT 转 PDF（或反向）
+     - OCR 识别扫描件、压缩、加水印、加页码
+     - 加密解密、去除密码、数字签名
+  3. 选好功能后上传文件，处理完直接下载，文件不经过任何第三方。
+
+  数据与安全：
+  - 配置与临时文件在 /lzcapp/var/config 和 /lzcapp/var/data，卸载应用会一并删除。
+  - 登录账号密码来自安装参数，密码默认随机生成，不存在内置弱口令。
+  - 已强制开启登录（SECURITY_ENABLELOGIN=true），未登录无法使用功能。
+  - 应用经懒猫入口鉴权访问。
+
+  说明：
+  - 单容器部署，所有处理都在本机容器内进行，不上传云端。
+  - 未默认安装额外的办公文档转换组件（INSTALL_BOOK_AND_ADVANCED_HTML_OPS=false），
+    因此电子书与高级 HTML 转换功能不可用；常用 PDF 功能不受影响。
+  - 未做真机验证：登录、合并拆分、OCR、格式转换以及重启后持久化均未在设备上实测。
