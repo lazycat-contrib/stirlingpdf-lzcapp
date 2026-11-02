@@ -1,6 +1,6 @@
 package: community.lazycat.app.stirlingpdf
 name: Stirling PDF
-version: 0.0.0
+version: 3.2.2
 description: "PDF toolbox in the browser: merge, split, convert, OCR and sign files locally."
 min_os_version: "1.5.0"
 homepage: https://www.stirlingpdf.com/
