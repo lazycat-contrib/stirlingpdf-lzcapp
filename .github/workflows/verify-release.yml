@@ -1,0 +1,120 @@
+name: Verify Stirling PDF Release on GitHub
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify
+        required: false
+        default: v3.2.2
+permissions:
+  contents: read
+concurrency:
+  group: stirlingpdf-release-verification
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve tag
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="$(gh release view --json tagName --jq .tagName)"; fi
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Download exact Release asset on runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ASSET_NAME="community.lazycat.app.stirlingpdf-${RELEASE_TAG}.lpk"
+          echo "ASSET_NAME=$ASSET_NAME" >> "$GITHUB_ENV"
+          gh release view "$RELEASE_TAG" --json tagName,assets > release-metadata.json
+          gh release download "$RELEASE_TAG" --pattern "$ASSET_NAME" --dir verify-pkg
+
+      - name: Verify package contents
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, tarfile, yaml
+
+          tag = os.environ['RELEASE_TAG']
+          name = os.environ['ASSET_NAME']
+          pkg = __import__('pathlib').Path('verify-pkg') / name
+          assert pkg.is_file(), pkg
+
+          h = hashlib.sha256()
+          with pkg.open('rb') as fh:
+              for chunk in iter(lambda: fh.read(1 << 20), b''):
+                  h.update(chunk)
+
+          with tarfile.open(pkg, 'r:') as package:
+              members = package.getnames()
+              for required in ('manifest.yml', 'package.yml', 'content.tar', 'icon.png'):
+                  assert required in members, (required, members)
+
+              info = yaml.safe_load(package.extractfile('package.yml').read())
+              assert info['package'] == 'community.lazycat.app.stirlingpdf', info['package']
+              assert info['name'] == 'Stirling PDF', info['name']
+              assert info['version'] == tag.lstrip('v'), (info['version'], tag)
+              assert info['license'] == 'MIT', info['license']
+              assert info['min_os_version'] == '1.5.0', info['min_os_version']
+
+              m = yaml.safe_load(package.extractfile('manifest.yml').read())
+              app = m['application']
+              assert app['subdomain'] == 'stirlingpdf', app['subdomain']
+              ups = app['upstreams']
+              assert any(u['location'] == '/' and u['backend'] == 'http://stirlingpdf:8080/' for u in ups), ups
+
+              svcs = m['services']
+              assert set(svcs) == {'stirlingpdf'}, set(svcs)
+
+              svc = svcs['stirlingpdf']
+              assert 'stirlingtools/stirling-pdf' in svc['image'], svc['image']
+              assert svc['image'].endswith(':' + tag.lstrip('v')), svc['image']
+
+              env = ' '.join(svc['environment'])
+              # login MUST be on: without it the whole UI is open to anyone
+              assert 'SECURITY_ENABLELOGIN=true' in env, env
+              assert 'SECURITY_INITIALLOGIN_USERNAME=' in env, env
+              assert 'SECURITY_INITIALLOGIN_PASSWORD=' in env, env
+              assert '.U.admin_password' in env, env
+              assert 'DOCKER_ENABLE_SECURITY=true' in env, env
+
+              binds = svc['binds']
+              assert any(b.endswith(':/configs') for b in binds), binds
+              assert any(b.endswith(':/data') for b in binds), binds
+
+              params = yaml.safe_load(package.extractfile('deploy_params.yml').read())
+              by_id = {q['id']: q for q in params['params']}
+              assert set(by_id) == {'admin_username', 'admin_password'}, set(by_id)
+              assert by_id['admin_password']['type'] == 'secret'
+              assert 'random' in str(by_id['admin_password'].get('default_value', ''))
+
+              assert 'healthcheck' not in svc, svc
+              text = package.extractfile('manifest.yml').read().decode()
+              assert 'lzc-file-chooser' not in text
+
+              with tarfile.open(fileobj=package.extractfile('content.tar')) as content:
+                  cmembers = content.getnames()
+                  lic = [n for n in cmembers if 'licenses/' in n]
+                  assert lic, cmembers
+                  main_lic = [n for n in lic if n.endswith('/LICENSE')]
+                  target = main_lic[0] if main_lic else lic[0]
+                  license_text = content.extractfile(target).read().decode()
+              # the file is a short MIT text with per-directory carve-outs, not a
+              # full GPL body -- assert on the plain MIT marker
+              assert 'MIT' in license_text, license_text[:200]
+
+          result = {
+              'verified': True,
+              'tag': tag,
+              'sha256': h.hexdigest(),
+              'size': pkg.stat().st_size,
+              'runtime_tested': False,
+          }
+          print(json.dumps(result))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('```json\n' + json.dumps(result, indent=2) + '\n```\n')
+          PY
